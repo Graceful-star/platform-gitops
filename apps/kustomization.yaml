@@ -1,9 +1,0 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-# Remove the reference to sample-app for now since it's empty
-# We'll add it back when we have actual content
-
-# apiVersion: kustomize.config.k8s.io/v1beta1
-# kind: Kustomization
-# resources:
-#   - sample-app/
