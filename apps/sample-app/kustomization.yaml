@@ -1,4 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# This is an empty kustomization for now
-# We'll add actual application manifests later
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
