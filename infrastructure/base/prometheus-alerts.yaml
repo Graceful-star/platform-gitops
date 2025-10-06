@@ -1,0 +1,106 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-alerts
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus-stack
+spec:
+  groups:
+    - name: slo_burn_rate_alerts
+      interval: 30s
+      rules:
+        - alert: SLOErrorBudgetFastBurn
+          expr: |
+            slo:error_budget:burn_rate:1h > 14.4
+            and
+            slo:error_budget:burn_rate:6h > 14.4
+          for: 2m
+          labels:
+            severity: critical
+            alert_type: slo_burn
+          annotations:
+            summary: "Fast SLO error budget burn detected"
+            description: "Error budget is burning at {{ $value }}x the acceptable rate"
+
+        - alert: SLOErrorBudgetSlowBurn
+          expr: |
+            slo:error_budget:burn_rate:6h > 6
+          for: 15m
+          labels:
+            severity: warning
+            alert_type: slo_burn
+          annotations:
+            summary: "Slow SLO error budget burn detected"
+            description: "Error budget is burning at {{ $value }}x the acceptable rate over the last 6 hours"
+
+    - name: availability_alerts
+      interval: 30s
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            frontend:requests:error_rate > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            service: frontend
+          annotations:
+            summary: "High error rate on frontend service"
+            description: "Frontend error rate is {{ $value | humanizePercentage }}"
+
+        - alert: ServiceDown
+          expr: |
+            up{job=~"sample-app/frontend|sample-app/backend"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Service {{ $labels.job }} is down"
+            description: "Service has been down for more than 2 minutes"
+
+    - name: latency_alerts
+      interval: 30s
+      rules:
+        - alert: HighLatency
+          expr: |
+            frontend:latency:p95 > 0.3
+          for: 5m
+          labels:
+            severity: warning
+            service: frontend
+          annotations:
+            summary: "High P95 latency on frontend service"
+            description: "Frontend P95 latency is {{ $value }}s"
+
+    - name: infrastructure_alerts
+      interval: 1m
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+            description: "Pod has restarted {{ $value }} times in the last 15 minutes"
+
+        - alert: NodeNotReady
+          expr: |
+            kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} is not ready"
+            description: "Node has been in NotReady state for more than 5 minutes"
+
+        - alert: HPAAtMaxCapacity
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas >= kube_horizontalpodautoscaler_spec_max_replicas
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} at max capacity"
+            description: "HPA has been at maximum replicas for more than 10 minutes"

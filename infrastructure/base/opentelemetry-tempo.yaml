@@ -1,0 +1,211 @@
+---
+# Grafana Tempo for trace storage
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: tempo
+      version: '1.7.x'
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 1m
+  values:
+    tempo:
+      repository: grafana/tempo
+      tag: 2.3.1
+      
+      storage:
+        trace:
+          backend: local
+          local:
+            path: /var/tempo/traces
+      
+      receivers:
+        jaeger:
+          protocols:
+            thrift_http:
+              endpoint: 0.0.0.0:14268
+            grpc:
+              endpoint: 0.0.0.0:14250
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+        zipkin:
+          endpoint: 0.0.0.0:9411
+
+    persistence:
+      enabled: true
+      size: 30Gi
+
+    serviceMonitor:
+      enabled: true
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+---
+# OpenTelemetry Operator
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: opentelemetry
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: opentelemetry-operator
+  namespace: monitoring
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: opentelemetry-operator
+      version: '0.x.x'
+      sourceRef:
+        kind: HelmRepository
+        name: opentelemetry
+        namespace: flux-system
+      interval: 1m
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    manager:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+---
+# OpenTelemetry Collector
+apiVersion: opentelemetry.io/v1alpha1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  mode: deployment
+  replicas: 2
+  
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      # Prometheus receiver for pulling metrics
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'otel-collector'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['localhost:8888']
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+      
+      # Add resource attributes
+      resource:
+        attributes:
+          - key: environment
+            value: dev
+            action: upsert
+          - key: cluster
+            value: sre-capstone-dev
+            action: upsert
+
+    exporters:
+      # Export traces to Tempo
+      otlp/tempo:
+        endpoint: tempo.monitoring:4317
+        tls:
+          insecure: true
+      
+      # Export metrics to Prometheus
+      prometheusremotewrite:
+        endpoint: http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/write
+        tls:
+          insecure: true
+      
+      # Logging for debugging
+      logging:
+        loglevel: info
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [otlp/tempo, logging]
+        
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, resource]
+          exporters: [prometheusremotewrite]
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+---
+# Service for OTLP gRPC
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-grpc
+  namespace: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: otel-collector-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+---
+# Service for OTLP HTTP
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-http
+  namespace: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: otel-collector-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
