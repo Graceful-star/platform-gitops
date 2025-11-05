@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ingress-nginx/namespace.yaml
+  - ingress-nginx/repository.yaml
+  - ingress-nginx/release.yaml
+  - cert-manager/namespace.yaml
+  - cert-manager/repository.yaml
+  - cert-manager/release.yaml
+  - cert-manager/letsencrypt-issuer.yaml
+  - prometheus/namespace.yaml
+  - prometheus/repository.yaml
+  - prometheus/release.yaml
+  - external-secrets/namespace.yaml
+  - external-secrets/repository.yaml
+  - external-secrets/release.yaml
